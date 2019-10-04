@@ -1,53 +1,59 @@
 "use strict";
 
-var request = require('request');
-const HttpStatusCodeOK = 200;
+const axios = require('axios');
+const {head} = require('lodash');
 
 class mercadoPagoService {
-    static async fetchClientCards(customer_id, mpAccessToken) {
-        await request.get(
-            `https://api.mercadopago.com/v1/customers/${customer_id}/cards?access_token=${mpAccessToken}`,
-            function (error, response, body) {
-                if (!error && response.statusCode === HttpStatusCodeOK) {
-                    console.log(body);
-                }
+    static async fetchClientCards(mpAccessToken, customer_id) {
+        try {
+            const response = await axios.get(`https://api.mercadopago.com/v1/customers/${customer_id}/cards?access_token=${mpAccessToken}`);
+            const r = head(response.data);
+            return {
+                cardId: r.id,
+                paymentMethodId: r.payment_method.id,
+                paymentTypeId: r.payment_method.payment_type_id,
+                issuerId: r.issuer.id
             }
-        );
+        } catch (err) {
+            return err.response.data;
+        }
     }
 
     static async generateCardToken(mpPublicKey, cardId) {
-        await request.post(
-            `https://api.mercadopago.com/v1/card_tokens?public_key=${mpPublicKey}`,
-            {json: { card_id: cardId }},
-            function (error, response, body) {
-                if (!error && response.statusCode === HttpStatusCodeOK) {
-                    console.log(body);
-                }
+        try {
+            const response = await axios.post(
+                `https://api.mercadopago.com/v1/card_tokens?public_key=${mpPublicKey}`,
+                {json: {card_id: cardId}}
+            );
+            const r = response.data;
+            return {
+                cardToken: r.id
             }
-        );
+        } catch (err) {
+            return err.response.data;
+        }
     }
 
-    static async getPayment(mpPublicKey, transactionAmount, cardToken, description, issuer_id, customerId) {
-        await request.post(
-            `https://api.mercadopago.com/v1/payments?access_token=${mpPublicKey}`,
-            { json: {
-                transaction_amount: transactionAmount,
-                token: cardToken,
-                description: description,
-                installments: installments,
-                payment_method_id: "mercadopago_cc",
-                issuer_id: issuer_id,
-                payer:{
-                    "type": "customer",
-                    "id": customerId
+    static async getPayment(mpAccessToken, transactionAmount, cardToken, description, issuer_id, customerId, paymentMethodId) {
+        try {
+            return await axios.post(
+                `https://api.mercadopago.com/v1/payments?access_token=${mpAccessToken}`,
+                {
+                    transaction_amount: transactionAmount,
+                    token: cardToken,
+                    description: description,
+                    installments: 1,
+                    payment_method_id: paymentMethodId,
+                    issuer_id: issuer_id,
+                    payer: {
+                        type: "customer",
+                        id: customerId
+                    }
                 }
-            } },
-            function (error, response, body) {
-                if (!error && response.statusCode == 200) {
-                    console.log(body);
-                }
-            }
-        );
+            );
+        } catch (err) {
+            return err.response.data;
+        }
     }
 }
 

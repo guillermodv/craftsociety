@@ -3,10 +3,9 @@
 const models = require('../../models');
 const queryPayment = require('../../models/query_payment');
 const mercadoPagoService = require('../../services/mercadoPago');
+const {escapeString} = require('../../util/functions');
 
-const MP_PUBLIC_KEY = 'TEST-cbbd9432-c899-42ce-9a6c-3c00282b6feb';
-const MP_ACCESS_TOKEN = 'TEST-2416554951664021-071712-8502ea3ee082343343396c015cda4ab9__LA_LB__-99502409';
-
+const {MP_PUBLIC_KEY, MP_ACCESS_TOKEN} = process.env;
 
 class PaymentService {
     static async fetchPayments(req, res) {
@@ -21,25 +20,60 @@ class PaymentService {
     }
 
     static async executePayments(req, res) {
-        await models.sequelize.query(queryPayment, {type: models.sequelize.QueryTypes.SELECT}).then(payments => {
-            if (!payments) {
-                return res.status(200).json({processed: 0});
-            }
-            if (payments) {
-                payments.map(payment => {
-                    const {customer_id, description, price} = payment;
-                    const {cardId, payment_metod, issuer_id} = mercadoPagoService.fetchClientCards(customer_id, MP_ACCESS_TOKEN);
-                    const {cardToken, public_key, cardholder} = mercadoPagoService.generateCardToken(MP_PUBLIC_KEY, cardId);
-                    const response = mercadoPagoService.getPayment(MP_ACCESS_TOKEN, price, cardToken, description, issuer_id, customer_id);
-                    // todo save in processed and errors.
-                });
+        try {
+            const payments = await models.sequelize.query(queryPayment, {type: models.sequelize.QueryTypes.SELECT});
+
+            const batch = {
+                approved: 0,
+                errors: 0,
+                processed: 0,
+                totalToProcess: payments.length
             };
 
-            return res.json({response});
-            // return res.json({processed: payments.length});
-        }).catch((err) => {
+            if (!payments) {
+                return res.status(200).json({batch});
+            }
+
+            if (payments) {
+                for (const payIt in payments) {
+                    const payment = payments[payIt];
+
+                    const {
+                        title,
+                        customer_id,
+                        subscription_id,
+                        mercadopago_customer_id,
+                        mercadopago_card_id,
+                        issuer_id,
+                        payment_method_id,
+                        price,
+                        customer_subscriptions_id,
+                        next_billing_on_approve
+                    } = payment;
+                    // const {cardId, paymentMethodId, issuerId} = await mercadoPagoService.fetchClientCards(MP_ACCESS_TOKEN, mercadopago_customer_id);
+                    const {cardToken} = await mercadoPagoService.generateCardToken(MP_PUBLIC_KEY, mercadopago_card_id);
+                    const response = await mercadoPagoService.getPayment(MP_ACCESS_TOKEN, price, cardToken, title, issuer_id, mercadopago_customer_id, payment_method_id);
+                    batch.processed++;
+
+                    if (response.status === 'approved') {
+                        const query = "UPDATE customer_subscriptions SET current_billing=CURDATE(), next_billing='"+next_billing_on_approve+"',billing_attempts=0 WHERE id="+customer_subscriptions_id;
+                        await models.sequelize.query(query);
+
+                        batch.approved++;
+                    } else {
+                        const query = "UPDATE customer_subscriptions SET billing_attempts=billing_attempts+1 WHERE id="+customer_subscriptions_id;
+                        await models.sequelize.query(query);
+                        batch.errors++;
+                    }
+                    const query = "INSERT INTO payment_logs SET customer_id="+customer_id+",subscription_id="+subscription_id+",time=NOW(),response='"+escapeString(response.status)+"',response_log='"+escapeString(JSON.stringify(response))+"';";
+                    await models.sequelize.query(query);
+                }
+            }
+
+            return res.json({batch});
+        } catch (err) {
             return res.status(500).json(err);
-        });
+        }
     }
 }
 

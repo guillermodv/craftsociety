@@ -6,9 +6,11 @@ customers.last_name,
 customers.email,
 subscriptions.title,
 subscription_products.price,
+customers.mercadopago_customer_id,
 customer_cards.mercadopago_card_id,
-customer_cards.public_key,
-CONCAT(customer_cards.first_six_digits,'XXXXXX',customer_cards.last_four_digits) card,
+customer_cards.issuer_id,
+customer_cards.payment_method_id,
+customer_subscriptions.id customer_subscriptions_id,
 customer_subscriptions.current_billing,
 customer_subscriptions.next_billing,
 CASE WHEN subscriptions.frequency_type='days' THEN
@@ -21,4 +23,7 @@ WHERE customer_subscriptions.customer_id=customers.id
 AND customer_subscriptions.subscription_id=subscriptions.id
 AND customer_cards.customer_id=customers.id
 AND subscription_products.subscription_id=subscriptions.id
-AND customer_subscriptions.next_billing <= CURDATE()`;
+AND customer_subscriptions.next_billing <= CURDATE()
+AND customer_subscriptions.billing_attempts < 3
+AND customer_cards.status='active'
+GROUP BY customers.id, subscriptions.id`;
